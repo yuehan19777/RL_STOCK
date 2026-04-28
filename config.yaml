@@ -1,0 +1,144 @@
+project:
+  name: WaveGraph-RAC
+  root_dir: "C:/Users/16209/Desktop/WaveGraph-RAC"
+  seed: 42
+
+data:
+  dataset_npz: "C:/Users/16209/Desktop/WDG_RL/data/processed/alpha360_csi100_top20_2007_2020.npz"
+  qlib_provider_uri: "C:/Users/16209/Desktop/WDG_RL/data/qlib_cn"
+  universe: "csi100"
+  start_date: "2007-01-01"
+  end_date: "2020-12-31"
+  train_start_for_topn: "2007-01-01"
+  train_end_for_topn: "2014-12-30"
+  n_stocks: 20
+  alpha360_lookback: 60
+  fields: ["open", "high", "low", "close", "vwap", "volume"]
+  split:
+    train: ["2007-01-01", "2014-12-30"]
+    valid: ["2015-01-01", "2016-12-30"]
+    test:  ["2017-01-01", "2020-12-31"]
+
+signal:
+  model_type: xgb_reg
+  horizon: 5
+  label_type: zscore_excess
+  winsorize_z: 5.0
+  predictions_npz: outputs/signal_predictions.npz
+  model_path: outputs/signal_model.joblib
+
+  xgb_reg:
+    n_estimators: 600
+    max_depth: 3
+    learning_rate: 0.03
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 2.0
+    min_child_weight: 5.0
+    objective: reg:pseudohubererror
+    tree_method: hist
+    n_jobs: -1
+
+risk:
+  wavelet: "db2"
+  levels: 3
+  window: 252
+  min_obs: 120
+  top_m: 5
+  residual_mode: "demean"
+  graph_cache_npz: "outputs/wavelet_graph_cache.npz"
+  cov_window: 60
+  cov_shrinkage: 0.3
+  psd_project_graph: true
+
+portfolio:
+  use_cash: true
+  init_equity: 1.0
+  cost_kappa: 0.001
+  w_max: 0.25
+  turnover_limit: 0.80
+  allow_short: false
+  fixed_params:
+    lambda_risk: 5.0
+    rho_graph: 1.0
+    eta_turnover: 0.10
+    exposure: 0.80
+
+  risk_overlay:
+    enabled: true
+    vol_window: 20
+    high_vol_quantile: 0.80
+    drawdown_threshold: -0.10
+    min_exposure: 0.40
+
+ppo:
+  enabled: true
+
+  # 第一阶段建议只让 PPO 控制 exposure
+  # 等 exposure 有效果后，再改成 ["exposure", "rho_graph"]
+  # 最后再考虑 ["exposure", "rho_graph", "lambda_risk", "eta_turnover"]
+  control_params: ["exposure"]
+
+  # 第一版建议 false，只让 PPO 输出 4 个核心参数
+  use_scale_alpha: false
+
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  lr: 0.0003
+  epochs: 8
+  minibatch_size: 128
+  ent_coef: 0.003
+  vf_coef: 0.5
+  max_grad_norm: 1.0
+  total_iterations: 60
+
+  network:
+    hidden_dim: 64
+    n_layers: 2
+    init_log_std: -1.0
+
+  action_multipliers:
+    lambda_risk: [0.7, 1.5]
+    rho_graph: [0.5, 2.0]
+    eta_turnover: [0.1, 1.0]
+    exposure: [0.65, 1.25]
+
+
+  # 规则先验：风险高时收缩，趋势好且信号强时放大
+  rule_prior:
+    enabled: true
+
+    # risk_score 越高，exposure 越低
+    risk_exposure_cut: 0.55
+
+    # trend_score 和 signal_score 越高，exposure 越高
+    trend_exposure_boost: 0.35
+
+    # 限制规则先验最终对 exposure 的影响范围
+    min_exposure_factor: 0.35
+    max_exposure_factor: 1.20
+
+    # 高风险时提高 lambda/rho
+    lambda_risk_boost: 0.80
+    rho_graph_boost: 1.20
+
+    # 信号弱时提高换手惩罚
+    eta_weak_signal_boost: 0.80
+
+  reward:
+    active_weight: 10.0
+    cost_weight: 5.0
+    graph_weight: 0.0
+    drawdown_weight: 0.20
+    drawdown_tolerance: 0.10
+
+    # 下面两个用于引导 PPO：高风险不应满仓，趋势好可以加仓
+    risk_exposure_penalty: 0.05
+    trend_exposure_bonus: 0.03
+
+backtest:
+  mode: "fixed"
+  benchmark: "equal_weight"
+  out_dir: "outputs/backtest"

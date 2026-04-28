@@ -1,0 +1,29 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+pytor/
+
+# VS Code
+.vscode/
+
+# Data and outputs
+data/
+outputs/
+
+# Model/checkpoint/cache files
+*.pt
+*.pth
+*.joblib
+*.pkl
+*.npz
+*.npy
+
+# OS files
+.DS_Store
+Thumbs.db
