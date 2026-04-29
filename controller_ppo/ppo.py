@@ -198,6 +198,13 @@ def train_ppo(env, cfg: Dict[str, Any], device: str | None = None) -> PPOTrainRe
         ep_mean_reward = float(np.mean(rollout["rewards"]))
         final_equity = float(rollout["infos"][-1].get("equity", 1.0))
 
+        infos = rollout["infos"]
+
+        mean_exposure = float(np.mean([x.get("exposure", 0.0) for x in infos]))
+        std_exposure = float(np.std([x.get("exposure", 0.0) for x in infos]))
+        mean_turnover = float(np.mean([x.get("turnover", 0.0) for x in infos]))
+        mean_drawdown = float(np.mean([x.get("drawdown", 0.0) for x in infos]))
+
         row = {
             "iter": it + 1,
             "episode_reward": ep_reward,
@@ -206,6 +213,10 @@ def train_ppo(env, cfg: Dict[str, Any], device: str | None = None) -> PPOTrainRe
             "pi_loss": float(np.mean(pi_losses)) if pi_losses else 0.0,
             "v_loss": float(np.mean(v_losses)) if v_losses else 0.0,
             "entropy": float(np.mean(entropies)) if entropies else 0.0,
+            "mean_exposure": mean_exposure,
+            "std_exposure": std_exposure,
+            "mean_turnover": mean_turnover,
+            "mean_drawdown": mean_drawdown,
         }
 
         history.append(row)
@@ -215,6 +226,8 @@ def train_ppo(env, cfg: Dict[str, Any], device: str | None = None) -> PPOTrainRe
             f"reward={ep_reward:.6f} "
             f"mean_reward={ep_mean_reward:.6f} "
             f"equity={final_equity:.4f} "
+            f"exposure={mean_exposure:.3f}±{std_exposure:.3f} "
+            f"turnover={mean_turnover:.3f} "
             f"pi_loss={row['pi_loss']:.6f} "
             f"v_loss={row['v_loss']:.6f}"
         )

@@ -78,32 +78,37 @@ ppo:
   # 第一阶段建议只让 PPO 控制 exposure
   # 等 exposure 有效果后，再改成 ["exposure", "rho_graph"]
   # 最后再考虑 ["exposure", "rho_graph", "lambda_risk", "eta_turnover"]
-  control_params: ["exposure"]
+  control_params: ["exposure", "rho_graph", "lambda_risk", "eta_turnover"]
 
   # 第一版建议 false，只让 PPO 输出 4 个核心参数
   use_scale_alpha: false
 
-  gamma: 0.99
-  gae_lambda: 0.95
-  clip_ratio: 0.2
-  lr: 0.0003
-  epochs: 8
-  minibatch_size: 128
-  ent_coef: 0.003
+  gamma: 0.97
+  gae_lambda: 0.90
+  clip_ratio: 0.15
+  lr: 0.0001
+  epochs: 4
+  minibatch_size: 256
+  ent_coef: 0.0005
   vf_coef: 0.5
-  max_grad_norm: 1.0
-  total_iterations: 60
+  max_grad_norm: 0.5
+  total_iterations: 100
 
   network:
-    hidden_dim: 64
+    hidden_dim: 32
     n_layers: 2
-    init_log_std: -1.0
+    init_log_std: -2.0
 
+  # action_multipliers:
+  #   lambda_risk: [0.7, 1.5]
+  #   rho_graph: [0.5, 2.0]
+  #   eta_turnover: [0.1, 1.0]
+  #   exposure: [0.65, 1.25]
   action_multipliers:
-    lambda_risk: [0.7, 1.5]
-    rho_graph: [0.5, 2.0]
-    eta_turnover: [0.1, 1.0]
-    exposure: [0.65, 1.25]
+    lambda_risk: [0.9, 1.1]
+    rho_graph: [0.9, 1.1]
+    eta_turnover: [0.8, 1.2]
+    exposure: [0.75, 1.25]
 
 
   # 规则先验：风险高时收缩，趋势好且信号强时放大
@@ -135,8 +140,10 @@ ppo:
     drawdown_tolerance: 0.10
 
     # 下面两个用于引导 PPO：高风险不应满仓，趋势好可以加仓
-    risk_exposure_penalty: 0.05
-    trend_exposure_bonus: 0.03
+    risk_exposure_penalty: 0.0
+    trend_exposure_bonus: 0.0
+
+    reward_clip: 0.05
 
 backtest:
   mode: "fixed"

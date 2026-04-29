@@ -35,19 +35,33 @@ def compute_controller_context(
     R = np.asarray(R, dtype=np.float64)
     mu_pred = np.asarray(mu_pred, dtype=np.float64)
 
-    # ---------- 市场收益 ----------
-    s20 = max(0, t - 20 + 1)
-    s60 = max(0, t - 60 + 1)
+    # ---------- 市场收益：只能使用 t 之前的信息 ----------
+    s20 = max(0, t - 20)
+    s60 = max(0, t - 60)
 
-    ew20 = np.nanmean(R[s20:t + 1], axis=1)
-    ew60 = np.nanmean(R[s60:t + 1], axis=1)
+    hist20 = R[s20:t]
+    hist60 = R[s60:t]
 
-    ret20 = float(np.nansum(ew20)) if len(ew20) else 0.0
-    ret60 = float(np.nansum(ew60)) if len(ew60) else 0.0
-    vol20 = float(np.nanstd(ew20)) if len(ew20) else 0.0
+    if hist20.shape[0] > 0:
+        ew20 = np.nanmean(hist20, axis=1)
+    else:
+        ew20 = np.array([], dtype=np.float64)
 
-    last_ret = R[t]
-    up_ratio = float(np.nanmean(last_ret > 0.0))
+    if hist60.shape[0] > 0:
+        ew60 = np.nanmean(hist60, axis=1)
+    else:
+        ew60 = np.array([], dtype=np.float64)
+
+    ret20 = float(np.nansum(ew20)) if ew20.size > 0 else 0.0
+    ret60 = float(np.nansum(ew60)) if ew60.size > 0 else 0.0
+    vol20 = float(np.nanstd(ew20)) if ew20.size > 1 else 0.0
+
+    # t 时刻决策前，只能看到 t-1 的截面收益
+    if t > 0:
+        last_ret = R[t - 1]
+        up_ratio = float(np.nanmean(last_ret > 0.0))
+    else:
+        up_ratio = 0.5
 
     # ---------- 当前回撤 ----------
     drawdown = float(equity / (equity_peak + 1e-12) - 1.0)
@@ -309,20 +323,31 @@ def build_state(
     t = int(t)
 
     # ---------- 市场状态 ----------
+    # 决策时点 t 只能使用 t 之前已经发生的收益 R[:t]
     market_feats = []
 
     for w in [5, 20, 60]:
-        s = max(0, t - w + 1)
-        hist = R[s:t + 1]
-        ew_ret = np.nanmean(hist, axis=1)
+        s = max(0, t - w)
+        hist = R[s:t]   # 不包含 R[t]
 
-        market_feats.append(float(np.nanmean(ew_ret)))
-        market_feats.append(float(np.nanstd(ew_ret)))
+        if hist.shape[0] > 0:
+            ew_ret = np.nanmean(hist, axis=1)
+            market_feats.append(float(np.nanmean(ew_ret)))
+            market_feats.append(float(np.nanstd(ew_ret)))
+        else:
+            market_feats.append(0.0)
+            market_feats.append(0.0)
 
-    last_ret = R[t]
-    market_feats.append(float(np.nanmean(last_ret)))
-    market_feats.append(float(np.nanstd(last_ret)))
-    market_feats.append(float(np.mean(last_ret > 0.0)))
+    # 上一期横截面收益统计，不能用 R[t]
+    if t > 0:
+        last_ret = R[t - 1]
+        market_feats.append(float(np.nanmean(last_ret)))
+        market_feats.append(float(np.nanstd(last_ret)))
+        market_feats.append(float(np.nanmean(last_ret > 0.0)))
+    else:
+        market_feats.append(0.0)
+        market_feats.append(0.0)
+        market_feats.append(0.0)
 
     # ---------- 信号状态 ----------
     mu_t = np.asarray(mu_pred[t], dtype=np.float64)
@@ -520,13 +545,12 @@ class MetaPortfolioEnv:
         w_cash = float(w_full[-1])
 
         # 收益使用下一期 return，避免当前动作吃到当前已知收益
-        next_pos = min(self.pos + 1, len(self.idx) - 1)
-        t_next = int(self.idx[next_pos])
+        # 当前动作在 t 时点形成组合，吃到 R[t]
+        # 因为 state[t] 已经改成只使用 R[:t]，所以这里使用 R[t] 不再泄露
+        r_t = self.R_all[t].astype(np.float64)
 
-        r_next = self.R_all[t_next].astype(np.float64)
-
-        port_ret = float(np.dot(w_asset, r_next))
-        bench_ret = float(np.nanmean(r_next))
+        port_ret = float(np.dot(w_asset, r_t))
+        bench_ret = float(np.nanmean(r_t))
 
         turnover = float(np.sum(np.abs(w_asset - self.w_prev)))
         cost_kappa = float(self.port_cfg.get("cost_kappa", 0.001))
@@ -552,14 +576,23 @@ class MetaPortfolioEnv:
 
         active_ret = port_ret - bench_ret
 
+        # reward = (
+        #     active_weight * active_ret
+        #     - cost_weight * cost
+        #     - graph_weight * graph_risk
+        #     - drawdown_weight * max(0.0, -drawdown - dd_tol)
+        #     - risk_exposure_penalty * context["risk_score"] * meta.exposure
+        #     + trend_exposure_bonus * context["trend_score"] * context["signal_score"] * meta.exposure
+        # )
         reward = (
             active_weight * active_ret
             - cost_weight * cost
-            - graph_weight * graph_risk
             - drawdown_weight * max(0.0, -drawdown - dd_tol)
-            - risk_exposure_penalty * context["risk_score"] * meta.exposure
-            + trend_exposure_bonus * context["trend_score"] * context["signal_score"] * meta.exposure
         )
+
+        # 防止极端值让 critic 崩掉
+        reward_clip = float(rew_cfg.get("reward_clip", 0.05))
+        reward = float(np.clip(reward, -reward_clip, reward_clip))
 
         self.w_prev = w_asset.astype(np.float32)
 
